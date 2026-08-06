@@ -252,6 +252,19 @@ export async function runMigrationOnce(adapter) {
   // Stamp the schema version we just reached so future boots skip re-backup.
   setMetaSync(adapter, "backupSchemaVersion", SCHEMA_VERSION);
 
+  // 2b. Seed default filter rules on a fresh DB (opt-in rules; user enables as needed).
+  try {
+    const { seedFilterRulesIfEmpty, ensurePudidilDefaults } = await import("./repos/filterRulesRepo.js");
+    const seeded = await seedFilterRulesIfEmpty(adapter);
+    if (seeded) console.log("[DB][migrate] seeded default filter rules");
+    // Additive backfill: add any PUDIDIL defaults missing on an existing DB
+    // (e.g. upgraded from the earlier 3-rule seed). Idempotent, never overwrites.
+    const backfilled = await ensurePudidilDefaults(adapter);
+    if (backfilled > 0) console.log(`[DB][migrate] backfilled ${backfilled} filter rules`);
+  } catch (err) {
+    console.warn("[DB][migrate] filter rules seed skipped:", err?.message || err);
+  }
+
   // 3. One-time legacy JSON import (only if DB was fresh on entry)
   const alreadyImported = fs.existsSync(MIGRATED_MARKER);
   const legacyMain = readJsonSafe(LEGACY_FILES.main);

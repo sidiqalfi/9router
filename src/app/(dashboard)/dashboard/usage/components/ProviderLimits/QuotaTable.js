@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatResetTime, getRemainingPercentage } from "./utils";
+import { formatResetTime, getRemainingPercentage, getQuotaColorClasses } from "./utils";
 
 const PAGE_SIZE = 10;
 
@@ -40,33 +40,12 @@ function formatResetTimeDisplay(resetTime) {
 }
 
 /**
- * Get color classes based on remaining percentage
+ * Get color classes based on remaining percentage.
+ * Delegates to the shared getQuotaColorClasses in utils so the Account Total
+ * aggregate bar (rendered by index.js) and these per-row bars stay in sync.
  */
 function getColorClasses(remainingPercentage) {
-  if (remainingPercentage > 70) {
-    return {
-      text: "text-green-600 dark:text-green-400",
-      bg: "bg-green-500",
-      bgLight: "bg-green-500/10",
-      emoji: "🟢",
-    };
-  }
-
-  if (remainingPercentage >= 30) {
-    return {
-      text: "text-yellow-600 dark:text-yellow-400",
-      bg: "bg-yellow-500",
-      bgLight: "bg-yellow-500/10",
-      emoji: "🟡",
-    };
-  }
-
-  return {
-    text: "text-red-600 dark:text-red-400",
-    bg: "bg-red-500",
-    bgLight: "bg-red-500/10",
-    emoji: "🔴",
-  };
+  return getQuotaColorClasses(remainingPercentage);
 }
 
 function sortQuotas(quotas, sortMode) {

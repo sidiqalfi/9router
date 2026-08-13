@@ -8,6 +8,8 @@ import Tooltip from "@/shared/components/Tooltip";
 import {
   parseQuotaData,
   calculatePercentage,
+  calculateAccountTotals,
+  getQuotaColorClasses,
   filterQuotasByVisibility,
   getHiddenQuotaRows,
   getQuotaVisibilityKey,
@@ -1034,6 +1036,10 @@ export default function ProviderLimits() {
           const rawQuotas = quota?.quotas || [];
           const visibleQuotas = filterQuotasByVisibility(conn.provider, rawQuotas, quotaVisibility);
           const hiddenQuotaRows = getHiddenQuotaRows(conn.provider, rawQuotas, quotaVisibility);
+          // Aggregate the account's visible countable quotas into one summary
+          // bar (e.g. 1029 / 2000 = 49%). Null when <2 countable rows — a single
+          // quota is already shown by its own bar, so an aggregate would duplicate it.
+          const accountTotals = calculateAccountTotals(visibleQuotas);
 
           return (
             <Card
@@ -1254,15 +1260,45 @@ export default function ProviderLimits() {
                     <p className="text-xs text-text-muted">{quota.message}</p>
                   </div>
                 ) : (
-                  <QuotaTable
-                    quotas={visibleQuotas}
-                    compact
-                    sortMode="default"
-                    showSortLabel={
-                      conn.provider === "codex" && quotaSortMode !== "default"
-                    }
-                    onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
-                  />
+                  <>
+                    {accountTotals && (
+                      <div className="mb-2 rounded-lg border border-black/10 bg-black/[0.02] px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                            Account Total
+                          </span>
+                          <span className="flex items-baseline gap-1.5">
+                            <span
+                              className="text-[11px] font-medium text-text-muted tabular-nums"
+                              title={`${accountTotals.used.toLocaleString()} / ${accountTotals.total.toLocaleString()}`}
+                            >
+                              {accountTotals.used.toLocaleString()} / {accountTotals.total.toLocaleString()}
+                            </span>
+                            <span
+                              className={`text-[11px] font-semibold tabular-nums ${getQuotaColorClasses(accountTotals.remainingPercentage).text}`}
+                            >
+                              {accountTotals.remainingPercentage}%
+                            </span>
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 rounded-full overflow-hidden border border-transparent">
+                          <div
+                            className={`h-full transition-all duration-300 ${getQuotaColorClasses(accountTotals.remainingPercentage).bg}`}
+                            style={{ width: `${Math.min(accountTotals.remainingPercentage, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <QuotaTable
+                      quotas={visibleQuotas}
+                      compact
+                      sortMode="default"
+                      showSortLabel={
+                        conn.provider === "codex" && quotaSortMode !== "default"
+                      }
+                      onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
+                    />
+                  </>
                 )}
                 {hiddenQuotaRows.length > 0 && (
                   <div className="mt-2 flex min-w-0 items-center gap-1 border-t border-black/5 pt-2 text-[10px] text-text-muted dark:border-white/5">

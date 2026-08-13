@@ -270,6 +270,38 @@ export function getStatusEmoji(percentage) {
 }
 
 /**
+ * Tailwind color classes for a remaining-percentage value.
+ * Same thresholds as getStatusColor/getStatusEmoji (>70 green, >=30 yellow, else red).
+ * Shared by QuotaTable rows and the Account Total aggregate bar so both stay in sync.
+ * @param {number} remainingPercentage - Remaining percentage (0-100)
+ * @returns {{text:string,bg:string,bgLight:string,emoji:string}}
+ */
+export function getQuotaColorClasses(remainingPercentage) {
+  if (remainingPercentage > 70) {
+    return {
+      text: "text-green-600 dark:text-green-400",
+      bg: "bg-green-500",
+      bgLight: "bg-green-500/10",
+      emoji: "🟢",
+    };
+  }
+  if (remainingPercentage >= 30) {
+    return {
+      text: "text-yellow-600 dark:text-yellow-400",
+      bg: "bg-yellow-500",
+      bgLight: "bg-yellow-500/10",
+      emoji: "🟡",
+    };
+  }
+  return {
+    text: "text-red-600 dark:text-red-400",
+    bg: "bg-red-500",
+    bgLight: "bg-red-500/10",
+    emoji: "🔴",
+  };
+}
+
+/**
  * Calculate remaining percentage
  * @param {number} used - Used amount
  * @param {number} total - Total amount
@@ -298,6 +330,45 @@ export function getRemainingPercentage(quota) {
   }
 
   return calculatePercentage(quota?.used, quota?.total);
+}
+
+/**
+ * Aggregate a connection's visible quotas into one "Account Total" summary.
+ *
+ * Sums `used` and `total` across every quota that has a real (finite, > 0)
+ * total — unlimited/null-total rows (e.g. some "unlimited" bonus packs) are
+ * excluded so they don't skew the aggregate. If only one countable quota
+ * exists, the account total would just mirror that single row, so we return
+ * null and let the card render the individual bar alone (avoids a redundant
+ * duplicate bar).
+ *
+ * @param {Array<{used?:number,total?:number,remaining?:number,remainingPercentage?:number}>} quotas
+ *   Visible, already-visibility-filtered quota rows for one connection.
+ * @returns {{used:number,total:number,remainingPercentage:number}|null}
+ */
+export function calculateAccountTotals(quotas) {
+  if (!Array.isArray(quotas) || quotas.length < 2) return null;
+
+  let usedSum = 0;
+  let totalSum = 0;
+  let count = 0;
+
+  for (const quota of quotas) {
+    const total = Number(quota?.total);
+    if (!Number.isFinite(total) || total <= 0) continue; // skip unlimited/null
+    const used = Number(quota?.used) || 0;
+    usedSum += used;
+    totalSum += total;
+    count += 1;
+  }
+
+  if (count < 2 || totalSum <= 0) return null;
+
+  const remainingPercentage = Math.round(
+    Math.max(0, Math.min(100, ((totalSum - usedSum) / totalSum) * 100)),
+  );
+
+  return { used: usedSum, total: totalSum, remainingPercentage };
 }
 
 export function getQuotaVisibilityKey(quota) {

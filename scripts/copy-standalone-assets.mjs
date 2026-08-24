@@ -54,6 +54,21 @@ export function copyStandaloneAssets({ projectRoot = process.cwd(), distDir = pr
     console.log(`[standalone-assets] Copied shared constants to ${sharedConstDestination}`);
   }
 
+  // better-sqlite3 is a native addon loaded via a runtime path-fallback list, so
+  // Next's static file tracer never sees the compiled .node binding and the
+  // standalone node_modules copy only carries lib/ + package.json. Copy the whole
+  // build/ tree so require('better-sqlite3') finds build/Release/better_sqlite3.node
+  // at runtime. Fail-open: if the binding was never compiled (no build tools /
+  // blocked install script), we skip it and the DB layer falls back to node:sqlite.
+  const betterSqliteBuildSource = resolve(projectRoot, "node_modules", "better-sqlite3", "build");
+  const betterSqliteBuildDestination = resolve(standaloneDir, "node_modules", "better-sqlite3", "build");
+  if (existsSync(betterSqliteBuildSource)) {
+    cpSync(betterSqliteBuildSource, betterSqliteBuildDestination, { recursive: true, force: true });
+    console.log(`[standalone-assets] Copied better-sqlite3 build tree to ${betterSqliteBuildDestination}`);
+  } else {
+    console.log(`[standalone-assets] better-sqlite3 build tree missing at ${betterSqliteBuildSource}; node:sqlite fallback will be used`);
+  }
+
   // Without it beside server.js the standalone build serves requests unsanitized.
   const serverWrapperSource = resolve(projectRoot, "custom-server.js");
   const serverWrapperDestination = resolve(standaloneDir, "custom-server.js");

@@ -7,6 +7,7 @@ export const REFRESH_INTERVAL_MS = 60000;
 export const CLAUDE_REFRESH_INTERVAL_MS = 600000;
 export const DEPLETED_QUOTA_THRESHOLD = 5;
 export const AUTO_REFRESH_STORAGE_KEY = "quotaAutoRefresh";
+export const QUOTA_FILTERS_STORAGE_KEY = "quotaFilters";
 export const CONNECTIONS_PAGE_SIZE = 20;
 export const ACCOUNT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 export const ACCOUNT_PAGE_SIZE_MAX = 500;
@@ -180,6 +181,34 @@ export function getSafeTotals(totals, fallbackTotal = 0) {
 
 export function shouldResetPage(previousValue, nextValue) {
   return previousValue !== nextValue;
+}
+
+// Account filter values are the canonical set from ACCOUNT_FILTER_OPTIONS.
+const ACCOUNT_FILTER_VALUES = new Set(
+  ACCOUNT_FILTER_OPTIONS.map((option) => option.value),
+);
+
+/**
+ * Sanitize filter values loaded from localStorage. Stored provider ids and
+ * account-status values may no longer exist (providers get removed, data is
+ * dynamic), so drop anything invalid and fall back to "all".
+ * @param {unknown} stored - Parsed value from localStorage (may be anything)
+ * @returns {{providerFilter:string,accountFilter:string}} Always-valid filters
+ */
+export function sanitizeStoredFilters(stored) {
+  const raw = stored && typeof stored === "object" ? stored : {};
+  const providerFilter =
+    typeof raw.providerFilter === "string" &&
+    raw.providerFilter.length > 0 &&
+    raw.providerFilter !== "all"
+      ? raw.providerFilter
+      : "all";
+  const accountFilter =
+    typeof raw.accountFilter === "string" &&
+    ACCOUNT_FILTER_VALUES.has(raw.accountFilter)
+      ? raw.accountFilter
+      : "all";
+  return { providerFilter, accountFilter };
 }
 
 export function getPaginationPageValue(dataPagination, fallbackPage) {

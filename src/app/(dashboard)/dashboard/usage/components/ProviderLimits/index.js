@@ -34,6 +34,8 @@ import {
   CLAUDE_REFRESH_INTERVAL_MS,
   DEPLETED_QUOTA_THRESHOLD,
   AUTO_REFRESH_STORAGE_KEY,
+  QUOTA_FILTERS_STORAGE_KEY,
+  sanitizeStoredFilters,
   CONNECTIONS_PAGE_SIZE,
   ACCOUNT_PAGE_SIZE_OPTIONS,
   ACCOUNT_PAGE_SIZE_MAX,
@@ -150,6 +152,7 @@ export default function ProviderLimits() {
   const [providerFilter, setProviderFilter] = useState("all");
   const [providerOptions, setProviderOptions] = useState([]);
   const [accountFilter, setAccountFilter] = useState("all");
+  const [hasHydratedFilters, setHasHydratedFilters] = useState(false);
   const [quotaSortMode, setQuotaSortMode] = useState("default");
   const [quotaVisibility, setQuotaVisibility] = useState({});
   const [expiringFirst, setExpiringFirst] = useState(false);
@@ -503,6 +506,11 @@ export default function ProviderLimits() {
   }, [refreshingAll, fetchConnections, fetchQuota, page]);
 
   useEffect(() => {
+    // Wait for persisted provider/account filters to hydrate before the first
+    // fetch so we load straight into the saved view instead of fetching "all"
+    // and then refetching with the stored filter (double-fetch flicker).
+    if (!hasHydratedFilters) return;
+
     const initializeData = async () => {
       setConnectionsLoading(true);
       const visibleConnections = await fetchConnections(page);
@@ -524,7 +532,7 @@ export default function ProviderLimits() {
     };
 
     initializeData();
-  }, [fetchConnections, fetchQuota, page]);
+  }, [fetchConnections, fetchQuota, page, hasHydratedFilters]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -538,6 +546,49 @@ export default function ProviderLimits() {
     if (typeof window === "undefined" || !hasHydratedAutoRefresh) return;
     window.localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, String(autoRefresh));
   }, [autoRefresh, hasHydratedAutoRefresh]);
+
+  // Hydrate persisted provider/account filters from localStorage on mount.
+  // SSR renders "all" first (matching the server), then this applies the saved
+  // filters client-side before the first data fetch (guarded by hasHydratedFilters).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let stored = null;
+    try {
+      stored = JSON.parse(
+        window.localStorage.getItem(QUOTA_FILTERS_STORAGE_KEY),
+      );
+    } catch {
+      stored = null;
+    }
+    const { providerFilter: savedProvider, accountFilter: savedAccount } =
+      sanitizeStoredFilters(stored);
+    if (savedProvider !== "all") setProviderFilter(savedProvider);
+    if (savedAccount !== "all") setAccountFilter(savedAccount);
+    setHasHydratedFilters(true);
+  }, []);
+
+  // Persist filter changes as they happen (no Apply button in this UI).
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasHydratedFilters) return;
+    try {
+      window.localStorage.setItem(
+        QUOTA_FILTERS_STORAGE_KEY,
+        JSON.stringify({ providerFilter, accountFilter }),
+      );
+    } catch {
+      // Fail-open: a full/blocked localStorage should never break the page.
+    }
+  }, [providerFilter, accountFilter, hasHydratedFilters]);
+
+  // Drop a persisted provider filter that no longer exists in the data (e.g.
+  // the provider was removed), so the UI doesn't sit on a dead filter.
+  useEffect(() => {
+    if (!hasHydratedFilters || providerFilter === "all") return;
+    if (providerOptions.length === 0) return;
+    if (!providerOptions.includes(providerFilter)) {
+      setProviderFilter("all");
+    }
+  }, [providerOptions, providerFilter, hasHydratedFilters]);
 
   // Load auto-ping per-connection maps
   useEffect(() => {

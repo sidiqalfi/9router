@@ -41,6 +41,10 @@ import {
   ACCOUNT_PAGE_SIZE_MAX,
   ACCOUNT_FILTER_OPTIONS,
   QUOTA_SORT_OPTIONS,
+  computeBurnRate,
+  formatBurnRateLabel,
+  BURN_RATE_DAYS,
+  BURN_RATE_CRITICAL_DAYS,
 } from "./utils";
 import Card from "@/shared/components/Card";
 import { ConfirmModal, EditConnectionModal } from "@/shared/components";
@@ -173,6 +177,7 @@ export default function ProviderLimits() {
     eligibleConnections: 0,
     providerFilteredConnections: 0,
   });
+  const [burnRateData, setBurnRateData] = useState({ days: BURN_RATE_DAYS, byConnection: {} });
 
   const intervalRef = useRef(null);
   const countdownRef = useRef(null);
@@ -468,6 +473,22 @@ export default function ProviderLimits() {
     };
   }, []);
 
+  const fetchBurnRate = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/usage/burn-rate?days=${BURN_RATE_DAYS}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && typeof data === "object") {
+        setBurnRateData({
+          days: Number(data.days) || BURN_RATE_DAYS,
+          byConnection: data.byConnection || {},
+        });
+      }
+    } catch (error) {
+      console.error("[ProviderLimits] Failed to fetch burn-rate data:", error);
+    }
+  }, []);
+
   const refreshAll = useCallback(async (force = false) => {
     if (refreshingAll) return;
 
@@ -491,11 +512,12 @@ export default function ProviderLimits() {
         filterQuotaStateByConnections(prev, visibleConnections),
       );
 
-      await Promise.all(
-        visibleConnections
+      await Promise.all([
+        fetchBurnRate(),
+        ...visibleConnections
           .filter(shouldFetch)
           .map((conn) => fetchQuota(conn.id, conn.provider)),
-      );
+      ]);
 
       setLastUpdated(new Date());
     } catch (error) {
@@ -503,7 +525,7 @@ export default function ProviderLimits() {
     } finally {
       setRefreshingAll(false);
     }
-  }, [refreshingAll, fetchConnections, fetchQuota, page]);
+  }, [refreshingAll, fetchConnections, fetchQuota, fetchBurnRate, page]);
 
   useEffect(() => {
     // Wait for persisted provider/account filters to hydrate before the first
@@ -525,14 +547,15 @@ export default function ProviderLimits() {
         filterQuotaStateByConnections(prev, visibleConnections),
       );
 
-      await Promise.all(
-        visibleConnections.map((conn) => fetchQuota(conn.id, conn.provider)),
-      );
+      await Promise.all([
+        fetchBurnRate(),
+        ...visibleConnections.map((conn) => fetchQuota(conn.id, conn.provider)),
+      ]);
       setLastUpdated(new Date());
     };
 
     initializeData();
-  }, [fetchConnections, fetchQuota, page, hasHydratedFilters]);
+  }, [fetchConnections, fetchQuota, fetchBurnRate, page, hasHydratedFilters]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1092,6 +1115,10 @@ export default function ProviderLimits() {
           // bar (e.g. 1029 / 2000 = 49%). Null when <2 countable rows — a single
           // quota is already shown by its own bar, so an aggregate would duplicate it.
           const accountTotals = calculateAccountTotals(visibleQuotas);
+          const accountBurnRate = computeBurnRate(
+            accountTotals?.remaining,
+            burnRateData.byConnection[conn.id],
+          );
 
           return (
             <Card
@@ -1344,12 +1371,46 @@ export default function ProviderLimits() {
                             style={{ width: `${Math.min(accountTotals.remainingPercentage, 100)}%` }}
                           />
                         </div>
+                        <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-dashed border-black/10 pt-1.5 text-[10px] tabular-nums dark:border-white/10">
+                          <span className="text-text-muted">⚡ Burn-rate</span>
+                          {accountBurnRate && !accountBurnRate.insufficientData ? (
+                            <span className="flex items-baseline gap-1.5">
+                              <span
+                                className={`font-semibold ${
+                                  accountBurnRate.low <= BURN_RATE_CRITICAL_DAYS
+                                    ? "text-red-600 dark:text-red-400"
+                                    : getQuotaColorClasses(accountTotals.remainingPercentage).text
+                                }`}
+                              >
+                                {formatBurnRateLabel(accountBurnRate)}
+                              </span>
+                              {accountBurnRate.low <= BURN_RATE_CRITICAL_DAYS && (
+                                <span className="rounded-full border border-amber-500/50 px-1.5 py-px font-semibold text-amber-700 dark:text-amber-300">
+                                  ⚠ nearly out
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">
+                              {accountBurnRate && accountBurnRate.windowDays > 0
+                                ? `collecting data (${accountBurnRate.activeDays} active day${accountBurnRate.activeDays === 1 ? "" : "s"})`
+                                : "—"}
+                            </span>
+                          )}
+                          {accountBurnRate && !accountBurnRate.insufficientData && (
+                            <span className="text-text-muted">
+                              median {Math.round(accountBurnRate.median)} req/day
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                     <QuotaTable
                       quotas={visibleQuotas}
                       compact
                       sortMode="default"
+                      dailyRequests={burnRateData.byConnection[conn.id]}
+                      showBurnRate={!accountTotals}
                       showSortLabel={
                         conn.provider === "codex" && quotaSortMode !== "default"
                       }

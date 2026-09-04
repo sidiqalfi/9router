@@ -731,6 +731,48 @@ export async function getChartData(period = "7d") {
   });
 }
 
+/**
+ * Per-connection daily request counts for burn-rate projection.
+ *
+ * Reads the pre-aggregated `usageDaily` summaries (same source as
+ * getUsageStats) and extracts, for each connectionId, the request count per
+ * day over the last `days` days. Days with no recorded activity are filled
+ * with 0 so percentile math sees a complete window.
+ *
+ * @param {number} days - Lookback window in days (default 30).
+ * @returns {Promise<{days: number, byConnection: Record<string, number[]>}>}
+ *   `byConnection` maps connectionId → array of daily request counts,
+ *   oldest first, length === days.
+ */
+export async function getDailyRequestCountsByConnection(days = 30) {
+  const db = await getAdapter();
+  const windowDays = Math.max(1, Number(days) || 30);
+  const dayRows = loadDaysInRange(db, windowDays);
+
+  const today = new Date();
+  const dayMap = new Map();
+  for (const r of dayRows) dayMap.set(r.dateKey, parseJson(r.data, {}));
+
+  const buckets = Array.from({ length: windowDays }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (windowDays - 1 - i));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+
+  const byConnection = {};
+  const bucketIndex = new Map(buckets.map((key, idx) => [key, idx]));
+  for (const dateKey of buckets) {
+    const day = dayMap.get(dateKey);
+    const byAccount = day?.byAccount || {};
+    for (const [connectionId, counter] of Object.entries(byAccount)) {
+      if (!byConnection[connectionId]) byConnection[connectionId] = new Array(windowDays).fill(0);
+      byConnection[connectionId][bucketIndex.get(dateKey)] = counter.requests || 0;
+    }
+  }
+
+  return { days: windowDays, byConnection };
+}
+
 function formatLogDate(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;

@@ -716,7 +716,7 @@ export function parseQuotaData(provider, data) {
   const modelOrder = getModelsByProviderId(provider);
   if (modelOrder.length > 0) {
     const orderMap = new Map(modelOrder.map((m, i) => [m.id, i]));
-    
+
     normalizedQuotas.sort((a, b) => {
       // Use modelKey for antigravity, otherwise use name
       const keyA = a.modelKey || a.name;
@@ -728,4 +728,84 @@ export function parseQuotaData(provider, data) {
   }
 
   return normalizedQuotas;
+}
+
+/**
+ * Burn-rate constants shared by the quota tracker.
+ */
+export const BURN_RATE_DAYS = 30;
+export const BURN_RATE_MIN_ACTIVE_DAYS = 3;
+export const BURN_RATE_CRITICAL_DAYS = 3;
+export const BURN_RATE_MIN_REQUESTS_PER_DAY = 0.5;
+
+function percentile(sortedValues, p) {
+  if (!sortedValues || sortedValues.length === 0) return 0;
+  const idx = (sortedValues.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sortedValues[lo];
+  return sortedValues[lo] * (hi - idx) + sortedValues[hi] * (idx - lo);
+}
+
+/**
+ * Compute a burn-rate projection for one account.
+ *
+ * Uses request counts per day (NOT cost — cost is volatile) and returns a
+ * day *range* from the 25th/75th percentiles so the UI can show "≈ 6–11 days"
+ * instead of an over-confident single number.
+ *
+ * @param {number} remaining - Absolute remaining quota (requests/credits).
+ * @param {Array<number>} dailyRequests - Daily request counts, oldest first.
+ *   May contain 0 for idle days; the window length is used to compute the
+ *   active-day rate.
+ * @returns {{low:number, high:number, median:number, activeDays:number, windowDays:number, insufficientData:boolean}|null}
+ *   - `insufficientData: true` when there are fewer than BURN_RATE_MIN_ACTIVE_DAYS
+ *     active days (rate can't be trusted yet).
+ *   - `null` when `remaining` is not a positive finite number (unlimited/∞).
+ */
+export function computeBurnRate(remaining, dailyRequests = []) {
+  if (!Number.isFinite(Number(remaining)) || Number(remaining) <= 0) return null;
+
+  const windowDays = Array.isArray(dailyRequests) ? dailyRequests.length : 0;
+  if (windowDays === 0) {
+    return { low: null, high: null, median: null, activeDays: 0, windowDays: 0, insufficientData: true };
+  }
+
+  const activeCounts = dailyRequests.filter((n) => (Number(n) || 0) > 0);
+  const activeDays = activeCounts.length;
+  if (activeDays < BURN_RATE_MIN_ACTIVE_DAYS) {
+    return { low: null, high: null, median: null, activeDays, windowDays, insufficientData: true };
+  }
+
+  const sorted = [...activeCounts].sort((a, b) => a - b);
+  const p25 = percentile(sorted, 0.25);
+  const p50 = percentile(sorted, 0.5);
+  const p75 = percentile(sorted, 0.75);
+  const remainingAbs = Number(remaining);
+
+  if (p50 < BURN_RATE_MIN_REQUESTS_PER_DAY) {
+    return { low: null, high: null, median: null, activeDays, windowDays, insufficientData: true };
+  }
+
+  const high = Math.max(1, Math.round(remainingAbs / Math.max(p25, BURN_RATE_MIN_REQUESTS_PER_DAY)));
+  const low = Math.max(1, Math.round(remainingAbs / p75));
+
+  return {
+    low,
+    high: Math.max(low, high),
+    median: p50,
+    activeDays,
+    windowDays,
+    insufficientData: false,
+  };
+}
+
+/**
+ * Human-readable burn-rate label.
+ * @returns {string} e.g. "≈ 6–11 days" or "—"
+ */
+export function formatBurnRateLabel(burn) {
+  if (!burn || burn.insufficientData || burn.low == null || burn.high == null) return "—";
+  if (burn.low === burn.high) return `≈ ${burn.low} day${burn.low === 1 ? "" : "s"}`;
+  return `≈ ${burn.low}–${burn.high} days`;
 }

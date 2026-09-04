@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatResetTime, getRemainingPercentage, getQuotaColorClasses } from "./utils";
+import {
+  formatResetTime,
+  getRemainingPercentage,
+  getQuotaColorClasses,
+  computeBurnRate,
+  formatBurnRateLabel,
+  BURN_RATE_CRITICAL_DAYS,
+} from "./utils";
 
 const PAGE_SIZE = 10;
 
@@ -69,6 +76,8 @@ export default function QuotaTable({
   sortMode = "default",
   showSortLabel = false,
   onHideQuota = null,
+  dailyRequests = [],
+  showBurnRate = false,
 }) {
   const [page, setPage] = useState(1);
 
@@ -143,6 +152,9 @@ export default function QuotaTable({
           // and their resetAt is a hard expiry, so word it as "expires".
           const recurring = quota.recurring !== false;
           const countdownLabel = recurring ? `in ${countdown}` : `expires in ${countdown}`;
+          const burnRate = showBurnRate
+            ? computeBurnRate(hasAbsoluteRemaining ? quota.remainingAbs : null, dailyRequests)
+            : null;
 
           return (
             <div
@@ -191,6 +203,29 @@ export default function QuotaTable({
                         : `${quota.remaining}%`}
                   </span>
                 </div>
+
+                {burnRate && (
+                  <div className="flex items-center justify-between gap-1 border-t border-dashed border-black/10 pt-1 text-[10px] tabular-nums dark:border-white/10">
+                    <span className="text-text-muted">⚡ Burn-rate</span>
+                    {burnRate.insufficientData ? (
+                      <span className="text-text-muted">
+                        {burnRate.windowDays > 0
+                          ? `collecting data (${burnRate.activeDays} active day${burnRate.activeDays === 1 ? "" : "s"})`
+                          : "—"}
+                      </span>
+                    ) : (
+                      <span
+                        className={`font-semibold ${
+                          burnRate.low <= BURN_RATE_CRITICAL_DAYS
+                            ? "text-red-600 dark:text-red-400"
+                            : colors.text
+                        }`}
+                      >
+                        {formatBurnRateLabel(burnRate)}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Reset time */}

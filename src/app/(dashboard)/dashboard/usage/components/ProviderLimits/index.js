@@ -1322,9 +1322,14 @@ export default function ProviderLimits() {
                           <span className="flex items-baseline gap-1.5">
                             <span
                               className="text-[11px] font-medium text-text-muted tabular-nums"
-                              title={`${accountTotals.used.toLocaleString()} / ${accountTotals.total.toLocaleString()}`}
+                              title={`${accountTotals.used.toLocaleString()} used · ${accountTotals.total.toLocaleString()} total · ${accountTotals.remaining.toLocaleString()} remaining`}
                             >
                               {accountTotals.used.toLocaleString()} / {accountTotals.total.toLocaleString()}
+                            </span>
+                            <span
+                              className={`text-[11px] font-semibold tabular-nums ${getQuotaColorClasses(accountTotals.remainingPercentage).text}`}
+                            >
+                              {accountTotals.remaining.toLocaleString()} left
                             </span>
                             <span
                               className={`text-[11px] font-semibold tabular-nums ${getQuotaColorClasses(accountTotals.remainingPercentage).text}`}

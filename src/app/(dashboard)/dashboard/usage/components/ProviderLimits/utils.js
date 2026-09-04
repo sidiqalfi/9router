@@ -408,7 +408,12 @@ export function calculateAccountTotals(quotas) {
     Math.max(0, Math.min(100, ((totalSum - usedSum) / totalSum) * 100)),
   );
 
-  return { used: usedSum, total: totalSum, remainingPercentage };
+  return {
+    used: usedSum,
+    total: totalSum,
+    remaining: Math.max(0, totalSum - usedSum),
+    remainingPercentage,
+  };
 }
 
 export function getQuotaVisibilityKey(quota) {

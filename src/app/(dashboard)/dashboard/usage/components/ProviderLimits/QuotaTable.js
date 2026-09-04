@@ -77,6 +77,9 @@ export default function QuotaTable({
       ...quota,
       index,
       remaining: getRemainingPercentage(quota),
+      remainingAbs: quota.unlimited === true
+        ? null
+        : Math.max(0, (Number(quota.total) || 0) - (Number(quota.used) || 0)),
     })),
     [quotas],
   );
@@ -130,6 +133,8 @@ export default function QuotaTable({
       <div className="space-y-px">
         {currentPageRows.map((quota) => {
           const isUnlimited = quota.unlimited === true;
+          const hasAbsoluteRemaining =
+            !isUnlimited && Number(quota.total) > 0;
           const colors = getColorClasses(quota.remaining);
           const countdown = formatResetTime(quota.resetAt);
           const resetDisplay = formatResetTimeDisplay(quota.resetAt);
@@ -171,7 +176,7 @@ export default function QuotaTable({
                     title={
                       isUnlimited
                         ? `${quota.used.toLocaleString()} used · Unlimited`
-                        : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`
+                        : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}${hasAbsoluteRemaining ? ` · ${quota.remainingAbs.toLocaleString()} left` : ""}`
                     }
                   >
                     {isUnlimited
@@ -179,7 +184,11 @@ export default function QuotaTable({
                       : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`}
                   </span>
                   <span className={`font-medium ${isUnlimited ? "text-green-600 dark:text-green-400" : colors.text} shrink-0`}>
-                    {isUnlimited ? "Unlimited" : `${quota.remaining}%`}
+                    {isUnlimited
+                      ? "Unlimited"
+                      : hasAbsoluteRemaining
+                        ? `${quota.remainingAbs.toLocaleString()} left · ${quota.remaining}%`
+                        : `${quota.remaining}%`}
                   </span>
                 </div>
               </div>

@@ -18,6 +18,7 @@ import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
+import ModelTestCard from "./ModelTestCard";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
@@ -181,6 +182,29 @@ export default function ProviderDetailPage() {
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
+  // Merged llm-only model list for the playground card (static/live + kilo free + custom rows).
+  const playgroundModels = (() => {
+    const rows = new Map();
+    const add = (m) => {
+      if (!m?.id) return;
+      const kind = getModelKind(m);
+      if (kind && kind !== "llm") return;
+      if (disabledModelIds.includes(m.id)) return;
+      if (!rows.has(m.id)) rows.set(m.id, { id: m.id, name: m.name || m.id });
+    };
+    if (!isCompatible) {
+      for (const m of models) add(m);
+      for (const m of kiloFreeModels) add(m);
+    }
+    for (const row of getProviderCustomModelRows({
+      customModels,
+      modelAliases,
+      providerAlias: providerStorageAlias,
+      builtInModels: isCompatible ? [] : models,
+      type: "llm",
+    })) add(row);
+    return [...rows.values()];
+  })();
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
@@ -1817,6 +1841,14 @@ export default function ProviderDetailPage() {
         )}
         {renderModelsSection()}
       </Card>
+
+      <ModelTestCard
+        models={playgroundModels}
+        connections={connections}
+        isFreeNoAuth={isFreeNoAuth}
+        requestAlias={providerDisplayAlias}
+        resolveThinkingSuffix={resolveThinkingSuffix}
+      />
 
       {bulkActionModal}
 

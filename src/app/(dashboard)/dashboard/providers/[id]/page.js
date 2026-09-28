@@ -80,6 +80,7 @@ export default function ProviderDetailPage() {
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
   const [oneByOneStopping, setOneByOneStopping] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
   const [oneByOneCurrentConnectionId, setOneByOneCurrentConnectionId] = useState(null);
   const [oneByOneResults, setOneByOneResults] = useState({});
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
@@ -918,6 +919,92 @@ export default function ProviderDetailPage() {
     }
   };
 
+  // ── Credential export / force-refresh (per-connection) ─────────────────────
+  // GET/POST /api/credentials/[connectionId] — the only dashboard route that
+  // returns raw stored credentials. ALWAYS_PROTECTED in dashboardGuard.js:
+  // JWT/CLI-token required even when requireLogin=false.
+
+  const fetchCredentialPayload = async (conn) => {
+    const res = await fetch(`/api/credentials/${conn.id}`, { cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || `Request failed (${res.status})`);
+    }
+    return data;
+  };
+
+  const handleCopyToken = async (conn) => {
+    const payload = await fetchCredentialPayload(conn);
+    // Prefer the durable credential: API key for key-based connections, then
+    // the OAuth refresh token, then the current access token.
+    const token = payload.apiKey || payload.refreshToken || payload.accessToken;
+    if (!token) throw new Error("No credential stored for this connection");
+    return token;
+  };
+
+  // Bulk export: every connection of this provider, fetched one-by-one through
+  // the per-connection endpoint (each request stays JWT-checked) and bundled
+  // into a single JSON download.
+  const handleExportAllCredentials = async () => {
+    if (exportingAll) return;
+    setExportingAll(true);
+    try {
+      const exported = [];
+      const skipped = [];
+      for (const conn of connections) {
+        try {
+          const res = await fetch(`/api/credentials/${conn.id}`, { cache: "no-store" });
+          if (!res.ok) {
+            // 404 = connection stores no credentials (e.g. free no-auth).
+            const data = await res.json().catch(() => ({}));
+            skipped.push({ name: conn.name || conn.email || conn.id, reason: data?.error || `HTTP ${res.status}` });
+            continue;
+          }
+          exported.push(await res.json());
+        } catch {
+          skipped.push({ name: conn.name || conn.email || conn.id, reason: "Fetch failed" });
+        }
+      }
+      if (exported.length === 0) {
+        alert(translate("No credentials to export for this provider"));
+        return;
+      }
+      const content = JSON.stringify(
+        { provider: providerId, exportedAt: new Date().toISOString(), connections: exported },
+        null,
+        2
+      );
+      const blob = new Blob([content], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `9router-${providerId}-credentials.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      if (skipped.length > 0) {
+        const names = skipped.map((s) => `${s.name} (${s.reason})`).join(", ");
+        alert(translate(`Skipped: ${names}`));
+      }
+    } catch (error) {
+      console.log("Error exporting credentials:", error);
+      alert(translate(error?.message || "Failed to export credentials"));
+    } finally {
+      setExportingAll(false);
+    }
+  };
+
+  const handleRefreshToken = async (conn) => {
+    const res = await fetch(`/api/credentials/${conn.id}`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || `Refresh failed (${res.status})`);
+    }
+    await fetchConnections();
+  };
+
+
   const handleSwapPriority = async (index1, index2) => {
     // Optimistic update state
     const newConnections = [...connections];
@@ -1092,6 +1179,8 @@ export default function ProviderDetailPage() {
                   setShowEditModal(true);
                 }}
                 onDelete={() => handleDelete(conn.id)}
+                onCopyToken={handleCopyToken}
+                onRefreshToken={handleRefreshToken}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
             </div>
@@ -1561,6 +1650,15 @@ export default function ProviderDetailPage() {
                       Delete Selected ({selectedConnectionIds.length})
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="download"
+                    onClick={handleExportAllCredentials}
+                    disabled={exportingAll || connections.length === 0}
+                  >
+                    {exportingAll ? "Exporting..." : "Export Credentials"}
+                  </Button>
                   <Button
                     size="sm"
                     variant="secondary"

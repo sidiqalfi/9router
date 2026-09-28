@@ -46,6 +46,9 @@ const ALWAYS_PROTECTED = [
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
   "/api/oauth/zed/auto-import",
+  // Returns raw stored credentials (export) and force-refreshes tokens.
+  // Must never ride the requireLogin=false bypass the rest of /api/* uses.
+  "/api/credentials",
 ];
 
 // Require auth, but allow through if requireLogin is disabled

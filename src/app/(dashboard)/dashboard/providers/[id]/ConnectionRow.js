@@ -6,10 +6,14 @@ import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onCopyToken, onRefreshToken, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
   const proxyDropdownRef = useRef(null);
+  const copyResetRef = useRef(null);
 
   const proxyPoolMap = new Map((proxyPools || []).map((pool) => [pool.id, pool]));
   const boundProxyPoolId = connection.providerSpecificData?.proxyPoolId || null;
@@ -58,6 +62,51 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showProxyDropdown]);
+
+  // Copy: parent fetches the credential from /api/credentials, this row writes
+  // it to the clipboard and flashes a check for 2s.
+  const handleCopyToken = async () => {
+    if (!onCopyToken || copied) return;
+    try {
+      const text = await onCopyToken(connection);
+      if (!text) return;
+      const write = async () => {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+      };
+      await write();
+      setCopied(true);
+      clearTimeout(copyResetRef.current);
+      copyResetRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Parent surfaces the fetch error via alert; row stays unchanged.
+    }
+  };
+
+  // Force-refresh: parent POSTs to /api/credentials; row shows a spinner and
+  // keeps the error icon + tooltip until the next attempt or list re-fetch.
+  const handleRefreshToken = async () => {
+    if (!onRefreshToken || refreshing) return;
+    setRefreshing(true);
+    setRefreshError("");
+    try {
+      await onRefreshToken(connection);
+    } catch (err) {
+      setRefreshError(err?.message || "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleSelectProxy = async (poolId) => {
     setUpdatingProxy(true);
@@ -257,6 +306,30 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </button>
             </Tooltip>
           )}
+          {onCopyToken && (
+            <Tooltip text="Copy credential (API key / refresh token)">
+              <button
+                onClick={handleCopyToken}
+                className={`flex w-full flex-col items-center rounded px-2 py-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${copied ? "text-green-500" : "text-text-muted hover:text-primary"}`}
+              >
+                <span className="material-symbols-outlined text-[18px]">{copied ? "check" : "content_copy"}</span>
+                <span className="text-[10px] leading-tight">{copied ? "Copied" : "Copy"}</span>
+              </button>
+            </Tooltip>
+          )}
+          {isOAuth && onRefreshToken && (
+            <Tooltip text={refreshError || "Force-refresh the OAuth token now"}>
+              <button
+                onClick={handleRefreshToken}
+                className={`flex w-full flex-col items-center rounded px-2 py-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${refreshError ? "text-red-500" : refreshing ? "text-primary" : "text-text-muted hover:text-primary"}`}
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {refreshing ? "progress_activity" : refreshError ? "error" : "refresh"}
+                </span>
+                <span className="text-[10px] leading-tight">Refresh</span>
+              </button>
+            </Tooltip>
+          )}
           <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
             <span className="material-symbols-outlined text-[18px]">edit</span>
             <span className="text-[10px] leading-tight">Edit</span>
@@ -304,6 +377,8 @@ ConnectionRow.propTypes = {
   onMoveDown: PropTypes.func.isRequired,
   onToggleActive: PropTypes.func.isRequired,
   onUpdateProxy: PropTypes.func,
+  onCopyToken: PropTypes.func,
+  onRefreshToken: PropTypes.func,
   onEdit: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
   oneByOneStatus: PropTypes.shape({

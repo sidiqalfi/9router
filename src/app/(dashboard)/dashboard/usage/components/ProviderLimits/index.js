@@ -673,6 +673,25 @@ export default function ProviderLimits() {
     }
   }, [providerOptions, providerFilter, hasHydratedFilters]);
 
+  // Drop a persisted ACCOUNT-STATUS filter that yields nothing for the current
+  // provider. Turning every account off while accountFilter="active" used to
+  // leave the page permanently empty: the filter was re-persisted on each load,
+  // so the user had to clear localStorage by hand to get the controls back.
+  // Fall back to "all" so the account list is always reachable.
+  useEffect(() => {
+    if (!hasHydratedFilters || connectionsLoading) return;
+    if (accountFilter === "all") return;
+    if (totals.providerFilteredConnections > 0) return;
+    // Nothing matches this status for this provider — reset to a filter that
+    // can't be permanently empty.
+    setAccountFilter("all");
+  }, [
+    hasHydratedFilters,
+    connectionsLoading,
+    accountFilter,
+    totals.providerFilteredConnections,
+  ]);
+
   // Load auto-ping per-connection maps
   useEffect(() => {
     fetch("/api/settings", { cache: "no-store" })
@@ -934,24 +953,6 @@ export default function ProviderLimits() {
     );
   }
 
-  if (!connectionsLoading && !hasVisibleConnections) {
-    return (
-      <Card padding="lg">
-        <div className="text-center py-12">
-          <span className="material-symbols-outlined text-[64px] text-text-muted opacity-20">
-            {emptyState.icon}
-          </span>
-          <h3 className="mt-4 text-lg font-semibold text-text-primary">
-            {emptyState.title}
-          </h3>
-          <p className="mt-2 text-sm text-text-muted max-w-md mx-auto">
-            {emptyState.description}
-          </p>
-        </div>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {/* Header Controls */}
@@ -1178,7 +1179,31 @@ export default function ProviderLimits() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* Rendered inside the main layout (not as an early return) so the filter
+          controls above stay reachable — otherwise an empty result traps the
+          user on a blank page. */}
+      {connectionsLoading ? (
+        <div className="flex items-center justify-center py-16 text-text-muted">
+          <span className="material-symbols-outlined text-[28px] animate-spin">
+            progress_activity
+          </span>
+        </div>
+      ) : !hasVisibleConnections ? (
+        <Card padding="lg">
+          <div className="text-center py-12">
+            <span className="material-symbols-outlined text-[64px] text-text-muted opacity-20">
+              {emptyState.icon}
+            </span>
+            <h3 className="mt-4 text-lg font-semibold text-text-primary">
+              {emptyState.title}
+            </h3>
+            <p className="mt-2 text-sm text-text-muted max-w-md mx-auto">
+              {emptyState.description}
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {sortedConnections.map((conn) => {
           const quota = quotaData[conn.id];
           const isLoading = loading[conn.id];
@@ -1534,8 +1559,10 @@ export default function ProviderLimits() {
             </Card>
           );
         })}
-      </div>
+        </div>
+      )}
 
+      {hasVisibleConnections && (
       <div className="rounded-xl border border-black/10 bg-black/[0.02] px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-text-muted">{connectionsPageSummary}</span>
@@ -1658,6 +1685,7 @@ export default function ProviderLimits() {
             </div>
           </div>
         </div>
+      )}
 
       <ConfirmModal
         isOpen={Boolean(resetConfirmState)}

@@ -27,4 +27,47 @@ describe("parseQuotaData codebuddy-cn recurring flag", () => {
     const out = parseQuotaData("codebuddy-cn", data);
     expect(out[0].recurring).toBe(true);
   });
+
+  // Ordering rule: refill packs stay on top (fullest first), bonus packs
+  // follow by soonest expiry; exhausted packs always sink to the bottom.
+  it("sinks exhausted packs below packs that still have credit", () => {
+    const data = {
+      quotas: {
+        Monthly: { used: 500, total: 500, resetAt: "2026-12-31T00:00:00Z", recurring: true },
+        "Bonus Pack 1": { used: 40, total: 100, resetAt: "2026-08-15T00:00:00Z", recurring: false },
+      },
+    };
+
+    const out = parseQuotaData("codebuddy-cn", data);
+    expect(out.map((q) => q.name)).toEqual(["Bonus Pack 1", "Monthly"]);
+  });
+
+  it("keeps refill packs on top, then bonus packs soonest-expiring first", () => {
+    const data = {
+      quotas: {
+        Monthly: { used: 0, total: 500, resetAt: "2026-12-31T00:00:00Z", recurring: true },
+        "Bonus Pack 2": { used: 40, total: 100, resetAt: "2026-09-01T00:00:00Z", recurring: false },
+        "Bonus Pack 1": { used: 0, total: 100, resetAt: "2026-08-01T00:00:00Z", recurring: false },
+      },
+    };
+
+    const out = parseQuotaData("codebuddy-cn", data);
+    expect(out.map((q) => q.name)).toEqual([
+      "Monthly", // recurring refill stays on top
+      "Bonus Pack 1", // expires soonest
+      "Bonus Pack 2",
+    ]);
+  });
+
+  it("orders refill packs fullest-first when no bonus pack is present", () => {
+    const data = {
+      quotas: {
+        Monthly: { used: 100, total: 500, recurring: true }, // 80% left
+        Weekly: { used: 50, total: 100, recurring: true }, // 50% left
+      },
+    };
+
+    const out = parseQuotaData("codebuddy-cn", data);
+    expect(out.map((q) => q.name)).toEqual(["Monthly", "Weekly"]);
+  });
 });

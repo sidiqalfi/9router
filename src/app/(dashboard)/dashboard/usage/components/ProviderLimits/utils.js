@@ -729,16 +729,41 @@ export function parseQuotaData(provider, data) {
         // with one-shot bonus packs ("Bonus Pack N"). Forward `recurring`
         // so the UI can show "Expires in" for bonus packs (whose resetAt is
         // a hard expiry, not a refresh) instead of "Reset in".
+        //
+        // Rows are ordered top→bottom as:
+        //   1. Exhausted / no-capacity packs sink to the bottom.
+        //   2. Refill packs (Monthly/Weekly/...) stay on top, fullest first.
+        //   3. Bonus packs follow, soonest-expiring first (their credit is
+        //      one-shot and is lost at expiry, so the most urgent comes up).
         if (data.quotas) {
-          Object.entries(data.quotas).forEach(([name, quota]) => {
-            normalizedQuotas.push({
-              name,
-              used: quota.used || 0,
-              total: quota.total || 0,
-              resetAt: quota.resetAt || null,
-              recurring: quota.recurring !== false,
-            });
+          const remainingRatio = (q) => {
+            const total = Number(q.total) || 0;
+            if (total <= 0) return -1; // no capacity
+            return Math.max(0, total - (Number(q.used) || 0)) / total;
+          };
+          const expiryMs = (q) => {
+            if (!q.resetAt) return Number.POSITIVE_INFINITY;
+            const t = new Date(q.resetAt).getTime();
+            return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+          };
+          const rows = Object.entries(data.quotas).map(([name, quota]) => ({
+            name,
+            used: quota.used || 0,
+            total: quota.total || 0,
+            resetAt: quota.resetAt || null,
+            recurring: quota.recurring !== false,
+          }));
+          const depleted = (q) => remainingRatio(q) <= 0;
+          const isBonus = (q) => q.recurring === false;
+          rows.sort((a, b) => {
+            if (depleted(a) !== depleted(b)) return depleted(a) ? 1 : -1;
+            if (isBonus(a) !== isBonus(b)) return isBonus(a) ? 1 : -1; // refill on top
+            if (isBonus(a)) {
+              return expiryMs(a) - expiryMs(b) || remainingRatio(b) - remainingRatio(a);
+            }
+            return remainingRatio(b) - remainingRatio(a) || expiryMs(a) - expiryMs(b);
           });
+          normalizedQuotas.push(...rows);
         }
         break;
 

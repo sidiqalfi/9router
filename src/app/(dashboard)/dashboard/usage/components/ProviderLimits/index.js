@@ -227,6 +227,10 @@ export default function ProviderLimits() {
     providerFilteredConnections: 0,
   });
   const [burnRateData, setBurnRateData] = useState({ days: BURN_RATE_DAYS, byConnection: {} });
+  // Aggregated quota across every matching account (not just the current page),
+  // for the header total. Fetched from /api/usage/summary.
+  const [summary, setSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   const intervalRef = useRef(null);
   const countdownRef = useRef(null);
@@ -549,6 +553,31 @@ export default function ProviderLimits() {
     }
   }, []);
 
+  // Aggregated total across every matching account (all pages), for the header.
+  // The endpoint caches for ~60s, so calling it on each auto-tick is cheap;
+  // a manual refresh passes force=true to bypass that cache.
+  const fetchSummary = useCallback(async (force = false) => {
+    setSummaryLoading(true);
+    try {
+      const params = new URLSearchParams({
+        provider: providerFilter,
+        accountStatus: accountFilter,
+      });
+      if (force) params.set("force", "1");
+      const response = await fetch(`/api/usage/summary?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      setSummary(data);
+    } catch (error) {
+      console.error("[ProviderLimits] Failed to fetch usage summary:", error);
+      setSummary(null);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [providerFilter, accountFilter]);
+
   const refreshAll = useCallback(async (force = false) => {
     if (refreshingAll) return;
 
@@ -574,6 +603,7 @@ export default function ProviderLimits() {
 
       await Promise.all([
         fetchBurnRate(),
+        fetchSummary(force),
         ...visibleConnections
           .filter(shouldFetch)
           .map((conn) => fetchQuota(conn.id, conn.provider)),
@@ -585,7 +615,7 @@ export default function ProviderLimits() {
     } finally {
       setRefreshingAll(false);
     }
-  }, [refreshingAll, fetchConnections, fetchQuota, fetchBurnRate, page]);
+  }, [refreshingAll, fetchConnections, fetchQuota, fetchBurnRate, fetchSummary, page]);
 
   useEffect(() => {
     // Wait for persisted provider/account filters to hydrate before the first
@@ -609,13 +639,14 @@ export default function ProviderLimits() {
 
       await Promise.all([
         fetchBurnRate(),
+        fetchSummary(),
         ...visibleConnections.map((conn) => fetchQuota(conn.id, conn.provider)),
       ]);
       setLastUpdated(new Date());
     };
 
     initializeData();
-  }, [fetchConnections, fetchQuota, fetchBurnRate, page, hasHydratedFilters]);
+  }, [fetchConnections, fetchQuota, fetchBurnRate, fetchSummary, page, hasHydratedFilters]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -956,8 +987,78 @@ export default function ProviderLimits() {
   return (
     <div className="space-y-6">
       {/* Header Controls */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
-        <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        {/* Aggregate quota across every account matching the current filter
+            (all pages), not just the current page. */}
+        <div className="min-w-0 flex-1">
+          {(() => {
+            const scopeLabel =
+              providerFilter === "all"
+                ? "All providers"
+                : providerLabel(providerFilter);
+            const hasData = summary && summary.available && summary.total > 0;
+            const colors = hasData
+              ? getQuotaColorClasses(summary.remainingPercentage)
+              : null;
+            return (
+              <Card padding="xs" className="min-w-0">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-[10px] uppercase tracking-wide text-text-muted">
+                        Total · {scopeLabel}
+                      </span>
+                      {summary?.connectionCount > 0 && (
+                        <span className="shrink-0 text-[10px] text-text-muted tabular-nums">
+                          {summary.connectionCount} account
+                          {summary.connectionCount > 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-semibold text-text-primary">
+                        {summaryLoading && !summary ? (
+                          <span className="inline-flex items-center gap-1 text-text-muted">
+                            <span className="material-symbols-outlined animate-spin text-[14px]">
+                              progress_activity
+                            </span>
+                            Loading…
+                          </span>
+                        ) : hasData ? (
+                          `${summary.remaining.toLocaleString()} / ${summary.total.toLocaleString()} left`
+                        ) : summary?.connectionCount === 0 ? (
+                          <span className="text-text-muted">
+                            No matching accounts
+                          </span>
+                        ) : (
+                          <span className="text-text-muted">—</span>
+                        )}
+                      </span>
+                      {hasData && (
+                        <span
+                          className={`shrink-0 text-sm font-semibold tabular-nums ${colors.text}`}
+                        >
+                          {summary.remainingPercentage}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1.5 h-1.5 rounded-full overflow-hidden border border-transparent bg-black/[0.04] dark:bg-white/[0.06]">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          hasData ? colors.bg : "bg-transparent"
+                        }`}
+                        style={{
+                          width: `${hasData ? Math.min(summary.remainingPercentage, 100) : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
           <div className="relative">
             <button
               type="button"

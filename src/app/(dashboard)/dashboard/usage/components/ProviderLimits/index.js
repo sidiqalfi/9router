@@ -1000,10 +1000,12 @@ export default function ProviderLimits() {
   return (
     <div className="space-y-6">
       {/* Header Controls */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         {/* Aggregate quota across every account matching the current filter
-            (all pages), not just the current page. */}
-        <div className="min-w-0 flex-1">
+            (all pages), not just the current page. Full-width to match the
+            provider cards below; flex-wrap lets the filter row drop to its
+            own line instead of crushing this card. */}
+        <div className="min-w-0 flex-1 basis-full">
           {(() => {
             const scopeLabel =
               providerFilter === "all"
